@@ -1,0 +1,204 @@
+import cv2
+from picamera2 import Picamera2
+import numpy as np
+import time
+import RPi.GPIO as GPIO
+
+# GPIO pin definitions
+IN1 = 17
+IN2 = 27
+IN3 = 23
+IN4 = 22
+ENA = 18
+ENB = 25
+
+PWM_FREQ = 1000 
+
+GPIO.setmode(GPIO.BCM)
+GPIO.setup([IN1, IN2, IN3, IN4, ENA, ENB], GPIO.OUT)
+
+pwm_a = GPIO.PWM(ENA, PWM_FREQ)
+pwm_b = GPIO.PWM(ENB, PWM_FREQ)
+pwm_a.start(0)  
+pwm_b.start(0)  
+
+
+picam2 = Picamera2()
+dispW =720
+dispH = 420
+picam2.preview_configuration.main.size = (dispW, dispH)
+picam2.preview_configuration.main.format = "RGB888"
+picam2.preview_configuration.controls.FrameRate = 30
+picam2.preview_configuration.align()
+picam2.configure("preview")
+picam2.start()
+
+# Initialize FPS calculation and text properties
+fps = 0
+pos = (30, 60)
+font = cv2.FONT_HERSHEY_SIMPLEX
+height = 1.5
+weight = 3
+myColor = (0, 0, 255)
+
+# Trackbar callback functions
+hueLow, hueHigh = 160, 179
+satLow, satHigh = 180, 255
+valLow, valHigh = 100, 255
+
+def onTrack1(val):
+    global hueLow
+    hueLow = val
+    print('Hue Low:', hueLow)
+
+def onTrack2(val):
+    global hueHigh
+    hueHigh = val
+    print('Hue High:', hueHigh)
+
+def onTrack3(val):
+    global satLow
+    satLow = val
+    print('Sat Low:', satLow)
+
+def onTrack4(val):
+    global satHigh
+    satHigh = val
+    print('Sat High:', satHigh)
+
+def onTrack5(val):
+    global valLow
+    valLow = val
+    print('Val Low:', valLow)
+
+def onTrack6(val):
+    global valHigh
+    valHigh = val
+    print('Val High:', valHigh)
+    
+
+def backward():
+    """Move the car forward."""
+    GPIO.output(IN1, GPIO.HIGH)
+    GPIO.output(IN2, GPIO.LOW)
+    GPIO.output(IN3, GPIO.HIGH)
+    GPIO.output(IN4, GPIO.LOW)
+
+def forward():
+    """Move the car backward."""
+    GPIO.output(IN1, GPIO.LOW)
+    GPIO.output(IN2, GPIO.HIGH)
+    GPIO.output(IN3, GPIO.LOW)
+    GPIO.output(IN4, GPIO.HIGH)
+
+def stop():
+    """Stop the car."""
+    GPIO.output([IN1, IN2, IN3, IN4], GPIO.LOW)
+
+def rotate_left():
+    """Rotate the car left."""
+    GPIO.output(IN1, GPIO.LOW)
+    GPIO.output(IN2, GPIO.HIGH)
+    GPIO.output(IN3, GPIO.HIGH)
+    GPIO.output(IN4, GPIO.LOW)
+
+def rotate_right():
+    """Rotate the car right."""
+    GPIO.output(IN1, GPIO.HIGH)
+    GPIO.output(IN2, GPIO.LOW)
+    GPIO.output(IN3, GPIO.LOW)
+    GPIO.output(IN4, GPIO.HIGH)
+
+# Create trackbars for adjusting HSV values
+cv2.namedWindow('myTracker')
+cv2.createTrackbar('Hue Low', 'myTracker', 35, 178, onTrack1)
+cv2.createTrackbar('Hue High', 'myTracker', 85, 179, onTrack2)
+cv2.createTrackbar('Sat Low', 'myTracker', 163, 255, onTrack3)
+cv2.createTrackbar('Sat High', 'myTracker', 255, 255, onTrack4)
+cv2.createTrackbar('Val Low', 'myTracker', 50, 255, onTrack5)
+cv2.createTrackbar('Val High', 'myTracker', 255, 255, onTrack6)
+
+try:
+    while True:
+        tStart = time.time()
+        frame = picam2.capture_array()
+        cv2.putText(frame, str(int(fps)) + ' FPS', pos, font, height, myColor, weight)
+        
+        lowerBound = np.array([hueLow, satLow, valLow])
+        upperBound = np.array([hueHigh, satHigh, valHigh])
+        frameHSV = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        myMask = cv2.inRange(frameHSV, lowerBound, upperBound)
+        myMaskSmall = cv2.resize(myMask, (int(dispW / 2), int(dispH / 2)))
+        objectOfIntrest = cv2.bitwise_and(frame, frame, mask=myMask)
+        objectOfIntrestSmall = cv2.resize(objectOfIntrest, (int(dispW / 2), int(dispH / 2)))
+        
+        contours, _ = cv2.findContours(myMask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if len(contours) > 0:
+            pwm_a.ChangeDutyCycle(10)
+            pwm_b.ChangeDutyCycle(10)
+            contours = sorted(contours, key=lambda x: cv2.contourArea(x), reverse=True)
+            cv2.drawContours(frame, contours, -1, (255, 0, 0), 3)  # Corrected color value
+            contour = contours[0]
+            x, y, w, h = cv2.boundingRect(contour)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 3)
+            print(x + w / 2, y + h / 2, w, h)
+            stop()
+            
+            # Movement logic based on object position
+            if x + w / 2 <=260:
+                
+                pwm_a.ChangeDutyCycle(30)
+                pwm_b.ChangeDutyCycle(30)
+                if w <= 30:
+                    pwm_a.ChangeDutyCycle(40)
+                    pwm_b.ChangeDutyCycle(40)
+                  
+                                
+                rotate_left()
+                print("l");
+               
+                #time.sleep(0.1)
+                
+            elif x + w / 2 >=460:
+                
+                pwm_a.ChangeDutyCycle(30)
+                pwm_b.ChangeDutyCycle(30)
+                if w <= 30:
+                    pwm_a.ChangeDutyCycle(40)
+                    pwm_b.ChangeDutyCycle(40)
+            
+                rotate_right()
+                print("r");
+                print((100-w)/1.6)
+               
+                
+            elif w <= 68:
+                forward()
+                print("f");
+                #time.sleep(0.1)
+            elif w >= 82:
+                backward()
+                print("b");
+                #time.sleep(0.1)
+            
+        else:
+            stop()
+         
+        
+        cv2.putText(frame, str(int(fps)) + ' FPS', pos, font, height, myColor, weight)
+        cv2.imshow("Camera", frame)
+        cv2.imshow("MY Mask", myMaskSmall)
+        cv2.imshow("object of intrest", objectOfIntrestSmall)
+        
+        if cv2.waitKey(1) == ord('q'):
+            break
+        
+        tEnd = time.time()
+        loopTime = tEnd - tStart
+        fps = 0.9 * fps + 0.1 * (1 / loopTime)
+finally:
+    pwm_a.stop()
+    pwm_b.stop()
+    GPIO.cleanup()
+    cv2.destroyAllWindows()
+
